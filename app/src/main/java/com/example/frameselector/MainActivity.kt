@@ -346,11 +346,6 @@ fun extractFramesMediaRetriever(frames: MutableList<Bitmap?>,video: File, fps: I
     }
 }
 
-
-
-fun sa(pair: Pair<Long,Int>){
-    Log.d("mert","i: ${pair.first}  ctr: ${pair.second}")
-}
 fun bitmapToFile(bitmap: Bitmap, directory: String,fileNameToSave: String): File?
 {
     // File name like "image.png"
@@ -412,29 +407,6 @@ fun getVideo(theFolderPathWithoutRoot: String, theNameOfFile: String):File?
     return null
 }
 
-fun getFramesAsArray(video: File):ArrayList<Bitmap>
-{
-    val frameList = ArrayList<Bitmap>()
-
-    val theDirectory = "${video.absolutePath.dropLastWhile { it != '/' }}${video.name.split(".")[0]+"_frames"}"
-    val theDirectoryFile = File(theDirectory)
-    if(theDirectoryFile.exists())
-    {
-        val files = theDirectoryFile.listFiles()
-
-        if (files != null) {
-            files.sortBy { it.name.split("_")[1].split(".")[0].toInt() }
-            for(i in files)
-            {
-                Log.d("mert","file: "+i.name)
-                frameList.add(BitmapFactory.decodeFile(i.absolutePath))
-            }
-        }
-    }
-    return frameList
-}
-
-
 fun getCurrPage(currSliderValue: Float, pageCount: Int):MutableState<Int>
 {
     return mutableStateOf(floor(currSliderValue*pageCount).toInt())
@@ -446,8 +418,6 @@ fun secToMilSec(sec:Long):Long = sec*1000
 fun milSecToSec(milSec:Long):Long = milSec/1000
 fun secToMicroSec(sec:Long):Long = sec*1000000
 fun microSecToSec(microSec:Long):Long = microSec/1000000
-
-
 
 fun getFPS(video:File)
 {
