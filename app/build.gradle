@@ -78,7 +78,15 @@ dependencies {
     //
     //videoplayer
     implementation 'com.google.android.exoplayer:exoplayer:2.18.1'
-    //coil
+    //viewmodel - livedata
+    // ViewModel
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.6.0-alpha01")
+    // ViewModel utilities for Compose
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.0-alpha01")
+    // LiveData
+    implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.6.0-alpha01")
+    // Lifecycles only (without ViewModel or LiveData)
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.0-alpha01")
 
 
 }

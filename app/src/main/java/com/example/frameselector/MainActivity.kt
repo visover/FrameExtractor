@@ -20,6 +20,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -38,6 +39,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.size
+import androidx.lifecycle.ViewModelProvider
 
 import com.bumptech.glide.Glide
 import com.bumptech.glide.GlideBuilder
@@ -92,6 +94,8 @@ class MainActivity : ComponentActivity() {
 
                 if(video != null)
                 {
+                    val mediaMetadataRetriever = MediaMetadataRetriever()
+                    mediaMetadataRetriever.setDataSource(video.absolutePath)
                     setContent {
                         FrameSelectorTheme {
                             // A surface container using the 'background' color from the theme
@@ -122,15 +126,22 @@ class MainActivity : ComponentActivity() {
                                 Log.d("mert","x: ${realSize.value.height} - ${realSize.value.width}")
                                 Log.d("mert","density: $")*/
 
-                                val frames = remember{mutableListOf<Bitmap?>()}
-                                val zoomIn = remember{ mutableStateOf(false)}
+                                val old_frames = remember{mutableListOf<ArrayList<Bitmap?>>()}
+                                val zoomIn = remember{ mutableStateOf(0)}
                                 val pagerState = rememberPagerState()
                                 val currSliderValue = remember{ mutableStateOf(0f)}
                                 var pageCount by remember{mutableStateOf(0)}
                                 val currPage = remember(key1 = currSliderValue.value){ getCurrPage(currSliderValue.value,pageCount)}
                                 val changeCurrPage = rememberCoroutineScope()
+                                var fps by remember{mutableStateOf(6)}
 
-                                val bitmapSource = remember{mutableStateOf<Bitmap?>(null)}
+                                val isExtracting = remember{mutableStateOf(false)}
+                                val progress = remember{mutableStateOf(0f) }
+
+                                val frames = remember{ArrayList<Bitmap?>()}
+                                val iterableList = remember{ArrayList<Pair<Long,Int>>()}
+                                var addToProgress by remember{mutableStateOf(0f)}
+                                var iterator by remember{mutableStateOf(0)}
 
                                 Column(
                                     Modifier
@@ -138,16 +149,21 @@ class MainActivity : ComponentActivity() {
                                         .background(Color.Yellow),
                                     verticalArrangement = Arrangement.Center,
                                     horizontalAlignment = Alignment.CenterHorizontally) {
-                                    if(zoomIn.value)
+
+                                    if(zoomIn.value != 0)
                                     {
+                                        Log.d("mert","isExtracting at Start: ${isExtracting.value}")
+                                        val curFrames = old_frames.last()
+                                        pageCount = curFrames.size
+
                                         HorizontalPager(count = pageCount, state = pagerState) { index ->
                                             Card(modifier = Modifier
                                                 .fillMaxWidth()
                                                 .height(360.dp)) {
-                                                // TODO: Glide Image
-                                                Image(bitmap = frames[index]!!.asImageBitmap(), contentDescription = "")
+                                                Image(bitmap = curFrames[index]!!.asImageBitmap(), contentDescription = "")
                                             }
                                         }
+
                                         Slider(value = currSliderValue.value, onValueChange = {
                                             currSliderValue.value = it
                                             changeCurrPage.launch {
@@ -155,11 +171,73 @@ class MainActivity : ComponentActivity() {
                                             }
                                         })
                                         Spacer(modifier = Modifier.size(5.dp))
-                                        Button(onClick = {
+                                        if(isExtracting.value)
+                                        {
+                                            LinearProgressIndicator(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(15.dp),
+                                                backgroundColor = Color.LightGray,
+                                                color = Color.Red,
+                                                progress = progress.value
+                                            )
+
+                                            val pair = iterableList[iterator]
+                                            Log.d("mert", "${pair.second} started...")
+
+                                            frames.add(mediaMetadataRetriever.getFrameAtTime(pair.first, MediaMetadataRetriever.OPTION_CLOSEST)!!)
+                                            iterator++
+                                            progress.value += addToProgress
+                                            Log.d("mert","progress value: ${progress.value}")
+                                            Log.d("mert","frames size: ${frames.size}")
+                                            if(iterator >= iterableList.size)
+                                            {
+                                                Log.d("mert","finish")
+                                                old_frames.add(ArrayList(frames))
+                                                Log.d("mert","a_0: ${old_frames.last().size}")
                                                 frames.clear()
-                                                zoomIn.value = false
-                                             }, colors = ButtonDefaults.buttonColors(Color.White)) {
-                                            Text(text = "Go Back to Video", color = Color.Green)
+                                                Log.d("mert","a_1: ${old_frames.last().size}")
+                                                progress.value = 0f
+                                                isExtracting.value = false
+                                                zoomIn.value++
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.size(5.dp))
+                                        Row{
+                                            Button(onClick = {
+                                                old_frames.run { removeAt(size-1) }
+                                                zoomIn.value -= 1
+                                            }, colors = ButtonDefaults.buttonColors(Color.White)) {
+                                                if(zoomIn.value == 1)
+                                                {
+                                                    Text(text = "Go Back to Video", color = Color.Green)
+                                                }
+                                                else
+                                                {
+                                                    Text(text = "Zoom OUT", color = Color.Green)
+                                                }
+                                            }
+
+                                            Spacer(modifier = Modifier.size(5.dp))
+                                            Button(onClick = {
+                                                Log.d("mert","current position: ${exoPlayer.currentPosition}")
+                                                fps += 6
+                                                val concatAmount:Long = secToMicroSec(1)/fps
+                                                var i:Long = milSecToMicroSec(exoPlayer.currentPosition)-secToMicroSec(1)
+                                                var ctr = 0
+                                                while(i< milSecToMicroSec(exoPlayer.currentPosition)+secToMicroSec(1))
+                                                {
+                                                    iterableList.add(Pair(i,ctr))
+                                                    i+=concatAmount
+                                                    ctr++
+                                                }
+                                                addToProgress = 1f/iterableList.size
+                                                progress.value = addToProgress
+                                                Log.d("mert","addToProgess xx : ${addToProgress}")
+                                                isExtracting.value = true
+                                            }){
+                                                Text(text = "Zoom IN", color = Color.Red)
+                                            }
                                         }
                                     }
                                     else
@@ -167,10 +245,7 @@ class MainActivity : ComponentActivity() {
                                         AndroidView(modifier = Modifier
                                             .height(360.dp)
                                             .fillMaxWidth()
-                                            .background(Color.Green)
-                                            /*.onGloballyPositioned { coordinates ->
-                                                realSize.value = coordinates.size
-                                            }*/,
+                                            .background(Color.Green),
                                             factory = { this_context ->
                                                 val playerView = StyledPlayerView(this_context).apply {
                                                     player = exoPlayer
@@ -189,6 +264,49 @@ class MainActivity : ComponentActivity() {
                                             }
                                         })
                                         Spacer(modifier = Modifier.size(5.dp))
+
+                                        if(isExtracting.value)
+                                        {
+                                            LinearProgressIndicator(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(15.dp),
+                                                backgroundColor = Color.LightGray,
+                                                color = Color.Red,
+                                                progress = progress.value
+                                            )
+                                            /*ExtractFramesAndProgressBar(
+                                                old_frames = old_frames,
+                                                video = video,
+                                                fps = fPS,
+                                                startMicroSec = milSecToMicroSec(exoPlayer.currentPosition)-secToMicroSec(1),
+                                                endMicroSec = milSecToMicroSec(exoPlayer.currentPosition)+secToMicroSec(1),
+                                                context = context
+                                            )*/
+                                            val pair = iterableList[iterator]
+                                            Log.d("mert", "${pair.second} started...")
+
+                                            frames.add(mediaMetadataRetriever.getFrameAtTime(pair.first, MediaMetadataRetriever.OPTION_CLOSEST)!!)
+                                            iterator++
+                                            progress.value += addToProgress
+                                            Log.d("mert","progress value: ${progress.value}")
+                                            Log.d("mert","frames size: ${frames.size}")
+                                            if(iterator >= iterableList.size)
+                                            {
+                                                Log.d("mert","finish")
+                                                old_frames.add(ArrayList(frames))
+                                                Log.d("mert","a_0: ${old_frames.last().size}")
+                                                frames.clear()
+                                                iterableList.clear()
+                                                iterator = 0
+                                                addToProgress = 0f
+                                                Log.d("mert","a_1: ${old_frames.last().size}")
+                                                progress.value = 0f
+                                                isExtracting.value = false
+                                                zoomIn.value++
+                                            }
+                                        }
+
                                         Row(){
                                             Button(onClick = {
                                                 exoPlayer.seekTo(14000L)
@@ -199,19 +317,19 @@ class MainActivity : ComponentActivity() {
                                             Spacer(Modifier.size(3.dp))
                                             Button(onClick = {
                                                 Log.d("mert","current position: ${exoPlayer.currentPosition}")
-
-                                                //extractFramesGlide (or) extractFramesMediaRetriever
-                                                extractFramesMediaRetriever(frames,
-                                                    video,
-                                                    10,
-                                                    milSecToMicroSec(exoPlayer.currentPosition)-secToMicroSec(8),
-                                                    milSecToMicroSec(exoPlayer.currentPosition)+secToMicroSec(8),
-                                                    context)
-                                                Log.d("mert","frames size after assigning: ${frames.size}")
-                                                pageCount = frames.size
-                                                val f = frames.groupingBy { it }.eachCount().filter { it.value>1 }
-                                                Log.d("mert","f: ${f}")
-                                                zoomIn.value = true
+                                                val concatAmount:Long = secToMicroSec(1)/fps
+                                                var i:Long = milSecToMicroSec(exoPlayer.currentPosition)-secToMicroSec(1)
+                                                var ctr = 0
+                                                while(i< milSecToMicroSec(exoPlayer.currentPosition)+secToMicroSec(1))
+                                                {
+                                                    iterableList.add(Pair(i,ctr))
+                                                    i+=concatAmount
+                                                    ctr++
+                                                }
+                                                addToProgress = 1f/iterableList.size
+                                                progress.value = addToProgress
+                                                Log.d("mert","addToProgess xx : ${addToProgress}")
+                                                isExtracting.value = true
                                             },
                                                 colors = ButtonDefaults.buttonColors(Color.White)) {
                                                 Text(text = "Capture Mode", color = Color.Red)
@@ -231,6 +349,49 @@ class MainActivity : ComponentActivity() {
         requestLauncher.launch(listOf(android.Manifest.permission.READ_EXTERNAL_STORAGE,android.Manifest.permission.WRITE_EXTERNAL_STORAGE).toTypedArray())
     }
 }
+
+/*@Composable
+fun ExtractFramesAndProgressBar(
+    old_frames: MutableList<ArrayList<Bitmap?>>,
+    video: File,
+    fps: Int,
+    startMicroSec: Long,
+    endMicroSec: Long,
+    context: Context)
+{
+    val progress = remember{ mutableStateOf(0f)}
+
+    LinearProgressIndicator(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(15.dp),
+        backgroundColor = Color.LightGray,
+        color = Color.Red,
+        progress = progress.value//progress color
+    )
+
+    val frames = ArrayList<Bitmap?>()
+    val concatAmount:Long = secToMicroSec(1)/fps
+    var i:Long = startMicroSec
+    var ctr = 0
+    val iterableList = ArrayList<Pair<Long,Int>>()
+    while(i< endMicroSec)
+    {
+        iterableList.add(Pair(i,ctr))
+        i+=concatAmount
+        ctr++
+    }
+
+
+
+    for(it in iterableList) {
+        Log.d("mert", "${it.second} started...")
+        frames.add(mediaMetadataRetriever.getFrameAtTime(it.first, MediaMetadataRetriever.OPTION_CLOSEST)!!)
+        progress.value += addToProgress
+        Log.d("mert","progress value: ${progress.value}")
+    }
+    old_frames.add(frames)
+}*/
 
 fun extractFramesCoil(iterableList: ArrayList<Pair<Long,Int>>, video: File, fps: Int, startMicroSec: Long, endMicroSec: Long, context: Context)
 {
@@ -275,55 +436,60 @@ fun extractFramesGlide(frames: MutableList<Bitmap?>, video: File, fps: Int, star
         frames.add(null)
     }
     val y = CountDownLatch(iterableList.size)
-    for(time in iterableList)
-    {
-        val insideLatch = CountDownLatch(1)
-        Log.d("mert","time: ${time.first}")
 
-        Glide.with(context)
-            .asBitmap()
-            .load(video.absolutePath)
-            .apply(RequestOptions()
-                .diskCacheStrategy(DiskCacheStrategy.ALL)
-                .centerCrop()
-                .frame(time.first)
-                .override(300)
-            )
-            .listener(object: RequestListener<Bitmap>{
-                override fun onLoadFailed(
-                    e: GlideException?,
-                    model: Any?,
-                    target: Target<Bitmap>?,
-                    isFirstResource: Boolean
-                ): Boolean {
-                    TODO("Not yet implemented")
-                }
+    val measuredTime = measureTimeMillis {
+        for(time in iterableList)
+        {
+            val insideLatch = CountDownLatch(1)
+            Log.d("mert","time: ${time.first}")
 
-                override fun onResourceReady(
-                    resource: Bitmap?,
-                    model: Any?,
-                    target: Target<Bitmap>?,
-                    dataSource: DataSource?,
-                    isFirstResource: Boolean
-                ): Boolean {
-                    frames.removeAt(time.second)
-                    frames.add(time.second,resource)
-                    Log.d("mert","frame successful: ${resource.hashCode()} at ${time.second}")
-                    y.countDown()
-                    insideLatch.countDown()
-                    return true
-                }
+            Glide.with(context)
+                .asBitmap()
+                .load(video.absolutePath)
+                .apply(RequestOptions()
+                    .diskCacheStrategy(DiskCacheStrategy.ALL)
+                    .centerCrop()
+                    .frame(time.first)
+                    .format(DecodeFormat.PREFER_ARGB_8888)
+                    .override(300)
+                )
+                .listener(object: RequestListener<Bitmap>{
+                    override fun onLoadFailed(
+                        e: GlideException?,
+                        model: Any?,
+                        target: Target<Bitmap>?,
+                        isFirstResource: Boolean
+                    ): Boolean {
+                        TODO("Not yet implemented")
+                    }
 
-            }).submit()
-        insideLatch.await()
-        /*frames.add(mediaMetadataRetriever.getFrameAtTime(time.first,MediaMetadataRetriever.OPTION_CLOSEST)!!)*/
+                    override fun onResourceReady(
+                        resource: Bitmap?,
+                        model: Any?,
+                        target: Target<Bitmap>?,
+                        dataSource: DataSource?,
+                        isFirstResource: Boolean
+                    ): Boolean {
+                        frames.removeAt(time.second)
+                        frames.add(time.second,resource)
+                        Log.d("mert","frame successful: ${resource.hashCode()} at ${time.second}")
+                        y.countDown()
+                        insideLatch.countDown()
+                        return true
+                    }
+
+                }).submit()
+            insideLatch.await()
+            /*frames.add(mediaMetadataRetriever.getFrameAtTime(time.first,MediaMetadataRetriever.OPTION_CLOSEST)!!)*/
+        }
+        y.await()
     }
-    y.await()
+    Log.d("mert","measuredTime of Glide: $measuredTime")
 }
 @RequiresApi(Build.VERSION_CODES.P)
-fun extractFramesMediaRetriever(frames: MutableList<Bitmap?>,video: File, fps: Int, startMicroSec: Long, endMicroSec: Long, context: Context)
+fun extractFramesMediaRetriever_0(old_frames: MutableList<ArrayList<Bitmap?>>,video: File, fps: Int, startMicroSec: Long, endMicroSec: Long, context: Context)
 {
-
+    val frames = ArrayList<Bitmap?>()
     val concatAmount:Long = secToMicroSec(1)/fps
     var i:Long = startMicroSec
     var ctr = 0
@@ -338,12 +504,189 @@ fun extractFramesMediaRetriever(frames: MutableList<Bitmap?>,video: File, fps: I
     val mediaMetadataRetriever = MediaMetadataRetriever()
     mediaMetadataRetriever.setDataSource(video.absolutePath)
 
-    for(it in iterableList){
-        Log.d("mert","${it.second} started...")
-        frames.add(
-            mediaMetadataRetriever.getFrameAtTime(it.first,MediaMetadataRetriever.OPTION_CLOSEST)!!
-        )
+    val mainDownLatch = CountDownLatch(iterableList.size)
+
+    mediaMetadataRetriever.run {
+        val measuredTime = measureTimeMillis {
+            for(it in iterableList){
+                Log.d("mert","${it.second} started...")
+                Glide.with(context)
+                    .asBitmap()
+                    .load(getFrameAtTime(it.first,MediaMetadataRetriever.OPTION_CLOSEST)!!)
+                    .listener(object: RequestListener<Bitmap>{
+                        override fun onLoadFailed(
+                            e: GlideException?,
+                            model: Any?,
+                            target: Target<Bitmap>?,
+                            isFirstResource: Boolean
+                        ): Boolean {
+                            TODO("Not yet implemented")
+                        }
+
+                        override fun onResourceReady(
+                            resource: Bitmap?,
+                            model: Any?,
+                            target: Target<Bitmap>?,
+                            dataSource: DataSource?,
+                            isFirstResource: Boolean
+                        ): Boolean {
+                            frames.add(it.second,resource!!)
+                            mainDownLatch.countDown()
+                            return true
+                        }
+
+                    })
+                    .submit()
+            }
+        }
+        mainDownLatch.await()
+        Log.d("mert","measuredTime of Retriever: $measuredTime")
     }
+    old_frames.add(frames)
+}
+fun extractFramesMediaRetriever_1(old_frames: MutableList<ArrayList<Bitmap?>>,video: File, fps: Int, startMicroSec: Long, endMicroSec: Long, progress: MutableState<Float>,context: Context)
+{
+    val frames = ArrayList<Bitmap?>()
+    val concatAmount:Long = secToMicroSec(1)/fps
+    var i:Long = startMicroSec
+    var ctr = 0
+    val iterableList = ArrayList<Pair<Long,Int>>()
+    while(i< endMicroSec)
+    {
+        iterableList.add(Pair(i,ctr))
+        i+=concatAmount
+        ctr++
+    }
+
+    val addToProgress = 1f/iterableList.size
+
+    val mediaMetadataRetriever = MediaMetadataRetriever()
+    mediaMetadataRetriever.setDataSource(video.absolutePath)
+
+    val mainDownLatch = CountDownLatch(iterableList.size)
+
+    val measuredTime = measureTimeMillis {
+            for(it in iterableList){
+                Log.d("mert","${it.second} started...")
+                Glide.with(context)
+                    .asBitmap()
+                    .load(mediaMetadataRetriever.getFrameAtTime(it.first,MediaMetadataRetriever.OPTION_CLOSEST)!!)
+                    .listener(object: RequestListener<Bitmap>{
+                        override fun onLoadFailed(
+                            e: GlideException?,
+                            model: Any?,
+                            target: Target<Bitmap>?,
+                            isFirstResource: Boolean
+                        ): Boolean {
+                            TODO("Not yet implemented")
+                        }
+
+                        override fun onResourceReady(
+                            resource: Bitmap?,
+                            model: Any?,
+                            target: Target<Bitmap>?,
+                            dataSource: DataSource?,
+                            isFirstResource: Boolean
+                        ): Boolean {
+                            frames.add(it.second,resource!!)
+                            progress.value += addToProgress
+                            mainDownLatch.countDown()
+                            return true
+                        }
+
+                    })
+                    .submit()
+            }
+        }
+    mainDownLatch.await()
+    Log.d("mert","measuredTime of Retriever: $measuredTime")
+    old_frames.add(frames)
+}
+
+fun extractFramesMediaRetriever_2(old_frames: MutableList<ArrayList<Bitmap?>>,video: File, fps: Int, startMicroSec: Long, endMicroSec: Long,progress: MutableState<Float>, context: Context)
+{
+    val frames = ArrayList<Bitmap?>()
+    val concatAmount:Long = secToMicroSec(1)/fps
+    var i:Long = startMicroSec
+    var ctr = 0
+    val iterableList = ArrayList<Pair<Long,Int>>()
+    while(i< endMicroSec)
+    {
+        iterableList.add(Pair(i,ctr))
+        i+=concatAmount
+        ctr++
+    }
+
+    val mediaMetadataRetriever = MediaMetadataRetriever()
+    mediaMetadataRetriever.setDataSource(video.absolutePath)
+    val addToProgress = 1f/iterableList.size
+    for(it in iterableList) {
+        Log.d("mert", "${it.second} started...")
+        frames.add(mediaMetadataRetriever.getFrameAtTime(it.first, MediaMetadataRetriever.OPTION_CLOSEST)!!)
+        progress.value += addToProgress
+        Log.d("mert","progress value: ${progress.value}")
+    }
+    old_frames.add(frames)
+}
+
+@RequiresApi(Build.VERSION_CODES.P)
+fun extractFramesMediaRetrieverIndex(frames: MutableList<Bitmap?>, video: File, fps: Int, startMicroSec: Long, endMicroSec: Long, context: Context)
+{
+    val concatAmount:Long = secToMicroSec(1)/fps
+    var i:Long = startMicroSec
+    var ctr = 100
+    val iterableList = ArrayList<Pair<Long,Int>>()
+    while(ctr<120)
+    {
+        iterableList.add(Pair(i,ctr))
+        i+=concatAmount
+        ctr++
+    }
+
+    val mediaMetadataRetriever = MediaMetadataRetriever()
+    mediaMetadataRetriever.setDataSource(video.absolutePath)
+
+    val mainDownLatch = CountDownLatch(iterableList.size)
+
+    mediaMetadataRetriever.run {
+        val measuredTime = measureTimeMillis {
+            for(it in iterableList){
+                Log.d("mert","${it.second} started...")
+                val localDownLatch = CountDownLatch(1)
+                Glide.with(context)
+                    .asBitmap()
+                    .load(getFrameAtIndex(it.second)!!)
+                    .listener(object: RequestListener<Bitmap>{
+                        override fun onLoadFailed(
+                            e: GlideException?,
+                            model: Any?,
+                            target: Target<Bitmap>?,
+                            isFirstResource: Boolean
+                        ): Boolean {
+                            TODO("Not yet implemented")
+                        }
+
+                        override fun onResourceReady(
+                            resource: Bitmap?,
+                            model: Any?,
+                            target: Target<Bitmap>?,
+                            dataSource: DataSource?,
+                            isFirstResource: Boolean
+                        ): Boolean {
+                            frames.add(it.second,resource!!)
+                            mainDownLatch.countDown()
+                            return true
+                        }
+
+                    })
+                    .submit()
+            }
+            mainDownLatch.await()
+        }
+        Log.d("mert","measuredTime of Retriever: $measuredTime")
+    }
+
+
 }
 
 fun bitmapToFile(bitmap: Bitmap, directory: String,fileNameToSave: String): File?
