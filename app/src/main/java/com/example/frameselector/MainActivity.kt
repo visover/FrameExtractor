@@ -69,11 +69,13 @@ import com.google.android.exoplayer2.ui.StyledPlayerView
 import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory
 import com.google.android.exoplayer2.util.Util
 import kotlinx.coroutines.*
+import kotlinx.coroutines.Dispatchers.Main
 import java.io.*
 import java.nio.channels.AsynchronousFileChannel
 import java.util.*
 import java.util.concurrent.CountDownLatch
 import kotlin.collections.ArrayList
+import kotlin.concurrent.thread
 import kotlin.math.floor
 import kotlin.system.measureTimeMillis
 
@@ -90,7 +92,7 @@ class MainActivity : ComponentActivity() {
 
                 Log.d("mert","izin verildi")
 
-                val video = getVideo("FrameSelector","LostInTheEcho.mp4")
+                val video = getVideo("FrameSelector","Transformers.mp4")
 
                 if(video != null)
                 {
@@ -126,14 +128,14 @@ class MainActivity : ComponentActivity() {
                                 Log.d("mert","x: ${realSize.value.height} - ${realSize.value.width}")
                                 Log.d("mert","density: $")*/
 
-                                val old_frames = remember{mutableListOf<ArrayList<Bitmap?>>()}
+                                val allFramesList = remember{mutableListOf<ArrayList<Bitmap?>>()}
                                 val zoomIn = remember{ mutableStateOf(0)}
                                 val pagerState = rememberPagerState()
                                 val currSliderValue = remember{ mutableStateOf(0f)}
                                 var pageCount by remember{mutableStateOf(0)}
                                 val currPage = remember(key1 = currSliderValue.value){ getCurrPage(currSliderValue.value,pageCount)}
                                 val changeCurrPage = rememberCoroutineScope()
-                                var fps by remember{mutableStateOf(6)}
+                                var fps by remember{mutableStateOf(0)}
 
                                 val isExtracting = remember{mutableStateOf(false)}
                                 val progress = remember{mutableStateOf(0f) }
@@ -153,7 +155,8 @@ class MainActivity : ComponentActivity() {
                                     if(zoomIn.value != 0)
                                     {
                                         Log.d("mert","isExtracting at Start: ${isExtracting.value}")
-                                        val curFrames = old_frames.last()
+                                        if(!isExtracting.value) progress.value = 0f
+                                        val curFrames = allFramesList[zoomIn.value-1]
                                         pageCount = curFrames.size
 
                                         HorizontalPager(count = pageCount, state = pagerState) { index ->
@@ -171,7 +174,7 @@ class MainActivity : ComponentActivity() {
                                             }
                                         })
                                         Spacer(modifier = Modifier.size(5.dp))
-                                        if(isExtracting.value)
+                                        /*if(isExtracting.value)
                                         {
                                             LinearProgressIndicator(
                                                 modifier = Modifier
@@ -193,19 +196,32 @@ class MainActivity : ComponentActivity() {
                                             if(iterator >= iterableList.size)
                                             {
                                                 Log.d("mert","finish")
-                                                old_frames.add(ArrayList(frames))
-                                                Log.d("mert","a_0: ${old_frames.last().size}")
+                                                allFramesList.add(ArrayList(frames))
+                                                Log.d("mert","a_0: ${allFramesList.last().size}")
                                                 frames.clear()
-                                                Log.d("mert","a_1: ${old_frames.last().size}")
+                                                Log.d("mert","a_1: ${allFramesList.last().size}")
                                                 progress.value = 0f
                                                 isExtracting.value = false
                                                 zoomIn.value++
                                             }
-                                        }
+                                        }*/
+                                        LinearProgressIndicator(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(15.dp),
+                                            backgroundColor = Color.LightGray,
+                                            color = Color.Red,
+                                            progress = progress.value
+                                        )
                                         Spacer(modifier = Modifier.size(5.dp))
+                                        Text(text = "FPS: ${fps}",color = Color.Blue)
                                         Row{
                                             Button(onClick = {
-                                                old_frames.run { removeAt(size-1) }
+                                                if(zoomIn.value == 1)
+                                                {
+                                                    allFramesList.clear()
+                                                }
+                                                fps-=6
                                                 zoomIn.value -= 1
                                             }, colors = ButtonDefaults.buttonColors(Color.White)) {
                                                 if(zoomIn.value == 1)
@@ -221,20 +237,32 @@ class MainActivity : ComponentActivity() {
                                             Spacer(modifier = Modifier.size(5.dp))
                                             Button(onClick = {
                                                 Log.d("mert","current position: ${exoPlayer.currentPosition}")
-                                                fps += 6
-                                                val concatAmount:Long = secToMicroSec(1)/fps
-                                                var i:Long = milSecToMicroSec(exoPlayer.currentPosition)-secToMicroSec(1)
-                                                var ctr = 0
-                                                while(i< milSecToMicroSec(exoPlayer.currentPosition)+secToMicroSec(1))
+                                                fps+=6
+                                                if(zoomIn.value < allFramesList.size)
                                                 {
-                                                    iterableList.add(Pair(i,ctr))
-                                                    i+=concatAmount
-                                                    ctr++
+                                                    zoomIn.value++
                                                 }
-                                                addToProgress = 1f/iterableList.size
-                                                progress.value = addToProgress
-                                                Log.d("mert","addToProgess xx : ${addToProgress}")
-                                                isExtracting.value = true
+                                                else
+                                                {
+                                                    isExtracting.value = true
+                                                    MainScope().launch(Main) {
+                                                        val result = extractFramesMediaRetriever_2(
+                                                            allFramesList,
+                                                            video,
+                                                            fps,
+                                                            milSecToMicroSec(exoPlayer.currentPosition)-secToMicroSec(1),
+                                                            milSecToMicroSec(exoPlayer.currentPosition)+secToMicroSec(1),
+                                                            progress,
+                                                            context
+                                                        )
+                                                        if(result){
+                                                            Log.d("mert","result came with true")
+                                                            isExtracting.value = false
+                                                            zoomIn.value++
+                                                        }
+                                                    }
+                                                    Log.d("mert","launch/async cikisi....")
+                                                }
                                             }){
                                                 Text(text = "Zoom IN", color = Color.Red)
                                             }
@@ -242,6 +270,8 @@ class MainActivity : ComponentActivity() {
                                     }
                                     else
                                     {
+                                        if(!isExtracting.value) progress.value = 0f
+
                                         AndroidView(modifier = Modifier
                                             .height(360.dp)
                                             .fillMaxWidth()
@@ -265,7 +295,7 @@ class MainActivity : ComponentActivity() {
                                         })
                                         Spacer(modifier = Modifier.size(5.dp))
 
-                                        if(isExtracting.value)
+                                        /*if(isExtracting.value)
                                         {
                                             LinearProgressIndicator(
                                                 modifier = Modifier
@@ -275,14 +305,14 @@ class MainActivity : ComponentActivity() {
                                                 color = Color.Red,
                                                 progress = progress.value
                                             )
-                                            /*ExtractFramesAndProgressBar(
-                                                old_frames = old_frames,
+                                            *//*ExtractFramesAndProgressBar(
+                                                allFramesList = allFramesList,
                                                 video = video,
                                                 fps = fPS,
                                                 startMicroSec = milSecToMicroSec(exoPlayer.currentPosition)-secToMicroSec(1),
                                                 endMicroSec = milSecToMicroSec(exoPlayer.currentPosition)+secToMicroSec(1),
                                                 context = context
-                                            )*/
+                                            )*//*
                                             val pair = iterableList[iterator]
                                             Log.d("mert", "${pair.second} started...")
 
@@ -294,42 +324,51 @@ class MainActivity : ComponentActivity() {
                                             if(iterator >= iterableList.size)
                                             {
                                                 Log.d("mert","finish")
-                                                old_frames.add(ArrayList(frames))
-                                                Log.d("mert","a_0: ${old_frames.last().size}")
+                                                allFramesList.add(ArrayList(frames))
+                                                Log.d("mert","a_0: ${allFramesList.last().size}")
                                                 frames.clear()
                                                 iterableList.clear()
                                                 iterator = 0
                                                 addToProgress = 0f
-                                                Log.d("mert","a_1: ${old_frames.last().size}")
+                                                Log.d("mert","a_1: ${allFramesList.last().size}")
                                                 progress.value = 0f
                                                 isExtracting.value = false
                                                 zoomIn.value++
                                             }
-                                        }
+                                        }*/
+                                        LinearProgressIndicator(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(15.dp),
+                                            backgroundColor = Color.LightGray,
+                                            color = Color.Red,
+                                            progress = progress.value
+                                        )
+                                        Spacer(modifier = Modifier.size(5.dp))
 
                                         Row(){
                                             Button(onClick = {
-                                                exoPlayer.seekTo(14000L)
-                                            },
-                                                colors = ButtonDefaults.buttonColors(Color.White)) {
-                                                Text(text = "Seek To", color = Color.Red)
-                                            }
-                                            Spacer(Modifier.size(3.dp))
-                                            Button(onClick = {
                                                 Log.d("mert","current position: ${exoPlayer.currentPosition}")
-                                                val concatAmount:Long = secToMicroSec(1)/fps
-                                                var i:Long = milSecToMicroSec(exoPlayer.currentPosition)-secToMicroSec(1)
-                                                var ctr = 0
-                                                while(i< milSecToMicroSec(exoPlayer.currentPosition)+secToMicroSec(1))
-                                                {
-                                                    iterableList.add(Pair(i,ctr))
-                                                    i+=concatAmount
-                                                    ctr++
-                                                }
-                                                addToProgress = 1f/iterableList.size
-                                                progress.value = addToProgress
-                                                Log.d("mert","addToProgess xx : ${addToProgress}")
                                                 isExtracting.value = true
+                                                fps+=6
+
+                                                MainScope().launch(Main) {
+                                                    val result = extractFramesMediaRetriever_2(
+                                                        allFramesList,
+                                                        video,
+                                                        fps,
+                                                        milSecToMicroSec(exoPlayer.currentPosition)-secToMicroSec(1),
+                                                        milSecToMicroSec(exoPlayer.currentPosition)+secToMicroSec(1),
+                                                        progress,
+                                                        context
+                                                    )
+                                                    if(result){
+                                                        Log.d("mert","result came with true")
+                                                        isExtracting.value = false
+                                                        zoomIn.value++
+                                                    }
+                                                }
+                                                Log.d("mert","launch/async cikisi....")
                                             },
                                                 colors = ButtonDefaults.buttonColors(Color.White)) {
                                                 Text(text = "Capture Mode", color = Color.Red)
@@ -350,75 +389,11 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/*@Composable
-fun ExtractFramesAndProgressBar(
-    old_frames: MutableList<ArrayList<Bitmap?>>,
-    video: File,
-    fps: Int,
-    startMicroSec: Long,
-    endMicroSec: Long,
-    context: Context)
-{
-    val progress = remember{ mutableStateOf(0f)}
-
-    LinearProgressIndicator(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(15.dp),
-        backgroundColor = Color.LightGray,
-        color = Color.Red,
-        progress = progress.value//progress color
-    )
-
-    val frames = ArrayList<Bitmap?>()
-    val concatAmount:Long = secToMicroSec(1)/fps
-    var i:Long = startMicroSec
-    var ctr = 0
-    val iterableList = ArrayList<Pair<Long,Int>>()
-    while(i< endMicroSec)
-    {
-        iterableList.add(Pair(i,ctr))
-        i+=concatAmount
-        ctr++
-    }
-
-
-
-    for(it in iterableList) {
-        Log.d("mert", "${it.second} started...")
-        frames.add(mediaMetadataRetriever.getFrameAtTime(it.first, MediaMetadataRetriever.OPTION_CLOSEST)!!)
-        progress.value += addToProgress
-        Log.d("mert","progress value: ${progress.value}")
-    }
-    old_frames.add(frames)
-}*/
-
-fun extractFramesCoil(iterableList: ArrayList<Pair<Long,Int>>, video: File, fps: Int, startMicroSec: Long, endMicroSec: Long, context: Context)
-{
-    Log.d("mert","extractFrames To array started...")
-    Log.d("mert","start sec: $startMicroSec , end sec: $endMicroSec")
-    //.override()
-
-
-    val concatAmount:Long = secToMicroSec(1)/fps
-    var i:Long = startMicroSec
-    var ctr = 0
-    while(i <= endMicroSec) {
-        iterableList.add(Pair(i, ctr))
-        i += concatAmount
-        ctr++
-    }
-
-    /*val mediaMetadataRetriever = MediaMetadataRetriever()
-    mediaMetadataRetriever.setDataSource(video.absolutePath)*/
-}
-fun extractFramesGlide(frames: MutableList<Bitmap?>, video: File, fps: Int, startMicroSec: Long, endMicroSec: Long, context: Context)
-{
-    Log.d("mert","extractFrames To array started...")
-    Log.d("mert","start sec: $startMicroSec , end sec: $endMicroSec")
-    //.override()
-
-
+suspend fun extractFramesMediaRetriever_2
+            (allFramesList: MutableList<ArrayList<Bitmap?>>,video: File, fps: Int, startMicroSec: Long, endMicroSec: Long,
+             progress: MutableState<Float>, context: Context): Boolean
+= withContext(Dispatchers.Default){
+    val frames:ArrayList<Bitmap?>
     val concatAmount:Long = secToMicroSec(1)/fps
     var i:Long = startMicroSec
     var ctr = 0
@@ -429,300 +404,36 @@ fun extractFramesGlide(frames: MutableList<Bitmap?>, video: File, fps: Int, star
         i+=concatAmount
         ctr++
     }
-    /*val mediaMetadataRetriever = MediaMetadataRetriever()
-    mediaMetadataRetriever.setDataSource(video.absolutePath)*/
-    for(x in 0..iterableList.size-1)
-    {
-        frames.add(null)
-    }
-    val y = CountDownLatch(iterableList.size)
 
-    val measuredTime = measureTimeMillis {
-        for(time in iterableList)
-        {
-            val insideLatch = CountDownLatch(1)
-            Log.d("mert","time: ${time.first}")
-
-            Glide.with(context)
-                .asBitmap()
-                .load(video.absolutePath)
-                .apply(RequestOptions()
-                    .diskCacheStrategy(DiskCacheStrategy.ALL)
-                    .centerCrop()
-                    .frame(time.first)
-                    .format(DecodeFormat.PREFER_ARGB_8888)
-                    .override(300)
-                )
-                .listener(object: RequestListener<Bitmap>{
-                    override fun onLoadFailed(
-                        e: GlideException?,
-                        model: Any?,
-                        target: Target<Bitmap>?,
-                        isFirstResource: Boolean
-                    ): Boolean {
-                        TODO("Not yet implemented")
-                    }
-
-                    override fun onResourceReady(
-                        resource: Bitmap?,
-                        model: Any?,
-                        target: Target<Bitmap>?,
-                        dataSource: DataSource?,
-                        isFirstResource: Boolean
-                    ): Boolean {
-                        frames.removeAt(time.second)
-                        frames.add(time.second,resource)
-                        Log.d("mert","frame successful: ${resource.hashCode()} at ${time.second}")
-                        y.countDown()
-                        insideLatch.countDown()
-                        return true
-                    }
-
-                }).submit()
-            insideLatch.await()
-            /*frames.add(mediaMetadataRetriever.getFrameAtTime(time.first,MediaMetadataRetriever.OPTION_CLOSEST)!!)*/
-        }
-        y.await()
-    }
-    Log.d("mert","measuredTime of Glide: $measuredTime")
-}
-@RequiresApi(Build.VERSION_CODES.P)
-fun extractFramesMediaRetriever_0(old_frames: MutableList<ArrayList<Bitmap?>>,video: File, fps: Int, startMicroSec: Long, endMicroSec: Long, context: Context)
-{
-    val frames = ArrayList<Bitmap?>()
-    val concatAmount:Long = secToMicroSec(1)/fps
-    var i:Long = startMicroSec
-    var ctr = 0
-    val iterableList = ArrayList<Pair<Long,Int>>()
-    while(i< endMicroSec)
-    {
-        iterableList.add(Pair(i,ctr))
-        i+=concatAmount
-        ctr++
-    }
-
-    val mediaMetadataRetriever = MediaMetadataRetriever()
-    mediaMetadataRetriever.setDataSource(video.absolutePath)
-
-    val mainDownLatch = CountDownLatch(iterableList.size)
-
-    mediaMetadataRetriever.run {
-        val measuredTime = measureTimeMillis {
-            for(it in iterableList){
-                Log.d("mert","${it.second} started...")
-                Glide.with(context)
-                    .asBitmap()
-                    .load(getFrameAtTime(it.first,MediaMetadataRetriever.OPTION_CLOSEST)!!)
-                    .listener(object: RequestListener<Bitmap>{
-                        override fun onLoadFailed(
-                            e: GlideException?,
-                            model: Any?,
-                            target: Target<Bitmap>?,
-                            isFirstResource: Boolean
-                        ): Boolean {
-                            TODO("Not yet implemented")
-                        }
-
-                        override fun onResourceReady(
-                            resource: Bitmap?,
-                            model: Any?,
-                            target: Target<Bitmap>?,
-                            dataSource: DataSource?,
-                            isFirstResource: Boolean
-                        ): Boolean {
-                            frames.add(it.second,resource!!)
-                            mainDownLatch.countDown()
-                            return true
-                        }
-
-                    })
-                    .submit()
-            }
-        }
-        mainDownLatch.await()
-        Log.d("mert","measuredTime of Retriever: $measuredTime")
-    }
-    old_frames.add(frames)
-}
-fun extractFramesMediaRetriever_1(old_frames: MutableList<ArrayList<Bitmap?>>,video: File, fps: Int, startMicroSec: Long, endMicroSec: Long, progress: MutableState<Float>,context: Context)
-{
-    val frames = ArrayList<Bitmap?>()
-    val concatAmount:Long = secToMicroSec(1)/fps
-    var i:Long = startMicroSec
-    var ctr = 0
-    val iterableList = ArrayList<Pair<Long,Int>>()
-    while(i< endMicroSec)
-    {
-        iterableList.add(Pair(i,ctr))
-        i+=concatAmount
-        ctr++
-    }
 
     val addToProgress = 1f/iterableList.size
+    val asyncList = ArrayList<Deferred<Boolean>>()
 
+    frames = ArrayList<Bitmap?>().run {
+        for(x in 1..ctr) add(null)
+        this
+    }
     val mediaMetadataRetriever = MediaMetadataRetriever()
     mediaMetadataRetriever.setDataSource(video.absolutePath)
-
-    val mainDownLatch = CountDownLatch(iterableList.size)
-
-    val measuredTime = measureTimeMillis {
-            for(it in iterableList){
-                Log.d("mert","${it.second} started...")
-                Glide.with(context)
-                    .asBitmap()
-                    .load(mediaMetadataRetriever.getFrameAtTime(it.first,MediaMetadataRetriever.OPTION_CLOSEST)!!)
-                    .listener(object: RequestListener<Bitmap>{
-                        override fun onLoadFailed(
-                            e: GlideException?,
-                            model: Any?,
-                            target: Target<Bitmap>?,
-                            isFirstResource: Boolean
-                        ): Boolean {
-                            TODO("Not yet implemented")
-                        }
-
-                        override fun onResourceReady(
-                            resource: Bitmap?,
-                            model: Any?,
-                            target: Target<Bitmap>?,
-                            dataSource: DataSource?,
-                            isFirstResource: Boolean
-                        ): Boolean {
-                            frames.add(it.second,resource!!)
-                            progress.value += addToProgress
-                            mainDownLatch.countDown()
-                            return true
-                        }
-
-                    })
-                    .submit()
-            }
+    Log.d("mert","frames initial capacity: ${frames.size}")
+    val time = measureTimeMillis {
+        for(it in iterableList) {
+            asyncList.add(
+                async {
+                    Log.d("mert", "${it.second} started...")
+                    frames[it.second] = mediaMetadataRetriever.getFrameAtTime(it.first, MediaMetadataRetriever.OPTION_CLOSEST)!!
+                    progress.value += addToProgress
+                    Log.d("mert","${it.second} finished !! (progress value: ${progress.value})")
+                    true
+                }
+            )
         }
-    mainDownLatch.await()
-    Log.d("mert","measuredTime of Retriever: $measuredTime")
-    old_frames.add(frames)
-}
-
-fun extractFramesMediaRetriever_2(old_frames: MutableList<ArrayList<Bitmap?>>,video: File, fps: Int, startMicroSec: Long, endMicroSec: Long,progress: MutableState<Float>, context: Context)
-{
-    val frames = ArrayList<Bitmap?>()
-    val concatAmount:Long = secToMicroSec(1)/fps
-    var i:Long = startMicroSec
-    var ctr = 0
-    val iterableList = ArrayList<Pair<Long,Int>>()
-    while(i< endMicroSec)
-    {
-        iterableList.add(Pair(i,ctr))
-        i+=concatAmount
-        ctr++
+        Log.d("mert","extracting for cikisi...")
+        asyncList.awaitAll()
     }
-
-    val mediaMetadataRetriever = MediaMetadataRetriever()
-    mediaMetadataRetriever.setDataSource(video.absolutePath)
-    val addToProgress = 1f/iterableList.size
-    for(it in iterableList) {
-        Log.d("mert", "${it.second} started...")
-        frames.add(mediaMetadataRetriever.getFrameAtTime(it.first, MediaMetadataRetriever.OPTION_CLOSEST)!!)
-        progress.value += addToProgress
-        Log.d("mert","progress value: ${progress.value}")
-    }
-    old_frames.add(frames)
-}
-
-@RequiresApi(Build.VERSION_CODES.P)
-fun extractFramesMediaRetrieverIndex(frames: MutableList<Bitmap?>, video: File, fps: Int, startMicroSec: Long, endMicroSec: Long, context: Context)
-{
-    val concatAmount:Long = secToMicroSec(1)/fps
-    var i:Long = startMicroSec
-    var ctr = 100
-    val iterableList = ArrayList<Pair<Long,Int>>()
-    while(ctr<120)
-    {
-        iterableList.add(Pair(i,ctr))
-        i+=concatAmount
-        ctr++
-    }
-
-    val mediaMetadataRetriever = MediaMetadataRetriever()
-    mediaMetadataRetriever.setDataSource(video.absolutePath)
-
-    val mainDownLatch = CountDownLatch(iterableList.size)
-
-    mediaMetadataRetriever.run {
-        val measuredTime = measureTimeMillis {
-            for(it in iterableList){
-                Log.d("mert","${it.second} started...")
-                val localDownLatch = CountDownLatch(1)
-                Glide.with(context)
-                    .asBitmap()
-                    .load(getFrameAtIndex(it.second)!!)
-                    .listener(object: RequestListener<Bitmap>{
-                        override fun onLoadFailed(
-                            e: GlideException?,
-                            model: Any?,
-                            target: Target<Bitmap>?,
-                            isFirstResource: Boolean
-                        ): Boolean {
-                            TODO("Not yet implemented")
-                        }
-
-                        override fun onResourceReady(
-                            resource: Bitmap?,
-                            model: Any?,
-                            target: Target<Bitmap>?,
-                            dataSource: DataSource?,
-                            isFirstResource: Boolean
-                        ): Boolean {
-                            frames.add(it.second,resource!!)
-                            mainDownLatch.countDown()
-                            return true
-                        }
-
-                    })
-                    .submit()
-            }
-            mainDownLatch.await()
-        }
-        Log.d("mert","measuredTime of Retriever: $measuredTime")
-    }
-
-
-}
-
-fun bitmapToFile(bitmap: Bitmap, directory: String,fileNameToSave: String): File?
-{
-    // File name like "image.png"
-    //create a file to write bitmap data
-    var file: File? = null
-    return try {
-        file = File(directory + File.separator + fileNameToSave)
-        if(!file.exists())
-        {
-            Log.d("mert","bitmap writing...")
-            file.createNewFile()
-
-            //Convert bitmap to byte array
-            val bos = ByteArrayOutputStream()
-            bitmap.compress(Bitmap.CompressFormat.JPEG,100,bos) // YOU can also save it in JPEG
-            val bitmapdata = bos.toByteArray()
-
-
-            //write the bytes in file
-            val fos = FileOutputStream(file)
-            fos.write(bitmapdata)
-            fos.flush()
-            fos.close()
-            Log.d("mert","bitmap written successfully!!")
-        }
-        else
-        {
-            Log.d("mert","bitmap found!!!")
-        }
-        file
-    } catch (e: Exception) {
-        e.printStackTrace()
-        file // it will return null
-    }
+    Log.d("mert","time: $time")
+    allFramesList.add(frames)
+    true
 }
 
 //theFolderPathWithoutRoot => root/<parameter>
@@ -761,39 +472,6 @@ fun secToMilSec(sec:Long):Long = sec*1000
 fun milSecToSec(milSec:Long):Long = milSec/1000
 fun secToMicroSec(sec:Long):Long = sec*1000000
 fun microSecToSec(microSec:Long):Long = microSec/1000000
-
-fun getFPS(video:File)
-{
-    val extractor = MediaExtractor()
-    var frameRate = 24 //may be default
-    try {
-        //Adjust data source as per the requirement if file, URI, etc.
-        extractor.setDataSource(video.absolutePath)
-        val numTracks = extractor.getTrackCount()
-        Log.d("mert",numTracks.toString())
-        var i = 0
-        while(i<numTracks){
-            val format = extractor.getTrackFormat(i)
-            val mime = format.getString(MediaFormat.KEY_MIME)
-            if (mime != null) {
-                if (mime.startsWith("video/")) {
-                    if (format.containsKey(MediaFormat.KEY_FRAME_RATE)) {
-                        frameRate = format.getInteger(MediaFormat.KEY_FRAME_RATE)
-                        Log.d("mert",frameRate.toString())
-                    }
-                }
-            }
-            i++
-        }
-    }
-    catch (e: IOException) {
-        e.printStackTrace();
-    }
-    finally {
-        //Release stuff
-        extractor.release();
-    }
-}
 
 
 
